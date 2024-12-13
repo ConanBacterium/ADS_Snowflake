@@ -1,0 +1,20 @@
+So here: https://docs.snowflake.com/en/user-guide/performance-query-exploring
+    Query: Track the average performance of a query over time
+        The following statement computes the daily average total elapsed time for all queries that have a specific parameterized query hash (cbd58379a88c37ed6cc0ecfebb053b03).
+
+        SELECT
+            DATE_TRUNC('day', start_time),
+            SUM(total_elapsed_time),
+            ANY_VALUE(query_id)
+        FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+        WHERE query_parameterized_hash = 'cbd58379a88c37ed6cc0ecfebb053b03'
+            AND DATE_TRUNC('day', start_time) >= CURRENT_DATE() - 30
+        GROUP BY DATE_TRUNC('day', start_time);
+
+So my plan is to get the query_parameterized_hash of each query, then I can collect the experiment starttime and endtime, run the queries X times on a warehouse and then collect the metrics. 
+
+I need to manually collect the query hash, because the following query is unreliable: 
+    select * from SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY order by start_time desc limit 1;
+It doesn't return your latest query, instead I get internal queries like "use role sysadmin;" which I have never used. 
+
+I will therefore instead change each query slightly, selecting a string literal like "Q1_SF100_warehouse_L" to make the hash unique for that scalefactor and warehouse. 
