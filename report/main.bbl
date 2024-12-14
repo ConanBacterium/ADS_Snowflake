@@ -1,0 +1,8 @@
+\begin{thebibliography}{1}
+
+\bibitem{snowflake_2016}
+Benoit Dageville, Thierry Cruanes, Marcin Zukowski, Vadim Antonov, Artin Avanes, Jon Bock, Jonathan Claybaugh, Daniel Engovatov, Martin Hentschel, Jiansheng Huang, Allison~W. Lee, Ashish Motivala, Abdul~Q. Munir, Steven Pelley, Peter Povinec, Greg Rahn, Spyridon Triantafyllis, and Philipp Unterbrunner.
+\newblock The snowflake elastic data warehouse.
+\newblock In {\em Proceedings of the 2016 International Conference on Management of Data}, SIGMOD '16, pages 215--226, New York, NY, USA, 2016. Association for Computing Machinery.
+
+\end{thebibliography}

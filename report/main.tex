@@ -1,0 +1,123 @@
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage[margin=1in]{geometry}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{makecell}
+\usepackage{adjustbox}
+\usepackage{placeins}
+\usepackage{url}
+\usepackage{adjustbox}
+\usepackage{subcaption}
+\usepackage{verbatim}
+\usepackage{listings}
+\usepackage{cite}
+\usepackage{breakurl}  % Added for better URL handling
+
+\title{Snowflake Naive Bayes and TPC-H}
+\author{jarotek aff}
+\date{December 2024}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+Snowflake\cite{snowflake_2016} is a cloud native data platform blabla. 
+In the following we wish to investigate and performance test two implementations of Naive Bayes on Yelp Reviews, a pure SQL implementation and a UDTF. We will discuss performance and ease of implementation, as well as under-the-hood details. 
+
+\bigskip
+Additionally we will conduct a standard TPC-H performance experiment with different configurations of Snowflake. 
+
+\section{Methodology}
+
+\subsection{TPC-H}
+For my TPC-H implementation I use data from the Snowflake-supplied database \texttt{SNOWFLAKE\_SAMPLE\_DATA}. I test TPC-H query 1, 5 and 18, which I copied from a website\footnote{\url{https://docs.deistercloud.com/content/Databases.30/TPCH\%20Benchmark.90/Sample\%20querys.20.xml?embedded=true\#7b15827ccb57cbcec68be7a26953590c}} and modified them to use Snowflake date functions. 
+
+\medskip \noindent Snowflake keeps a query history which, as everything else in Snowflake, can be queried on with SQL\footnote{\url{https://docs.snowflake.com/en/user-guide/performance-query-exploring#query-track-the-average-performance-of-a-query-over-time}}. Every query gets hashed, and the query hash can subsequently be used to query the query history and analyze the performance of every execution of the query.
+
+\medskip \noindent I have a Python script under my Github repository (\url{tpch/snowflake_tpch_generate.py}), which takes as program argument the number of iterations. It then generates a SQL script that can be copied into a SQL Worksheet in the snowflake client and executed. 
+
+\medskip \noindent The generation script puts a no-cache statement (\texttt{ALTER SESSION SET USE\_CACHED\_RESULT=FALSE;}) before each query. It then executes query 1, 5 and 18 on 4 sizes (extra small, small, medium, large) of warehouses, over scalefactor 1, 10, 100 and 1000. The warehouse is changed with the \texttt{USE WAREHOUSE} statement, and the scalefactors are changed with the \texttt{use schema} statement, (e.g. \texttt{use schema snowflake\_sample\_data.tpch\_sf1000}).
+
+\medskip \noindent To distinguish between the 3 queries on the different scale factor and warehouse settings, I augment the queries to select a string literal to force a unique query hash, e.g. $$ \texttt{SELECT 'BISON\_WH\_XS\_Q1\_SF1000', (...)} $$
+
+\medskip \noindent I have 48 distinct queries (3 queries * 4 warehouses * 4 scalefactors). I collect the query hashes manually from the query history, and I can then analyse the execution time with: 
+
+\begin{verbatim}
+    SELECT 
+    query_parameterized_hash,
+    COUNT(*) as query_count,
+    AVG(total_elapsed_time) as mean_elapsed_time,
+    STDDEV(total_elapsed_time) as std_elapsed_time,
+    MAX(total_elapsed_time) as max_elapsed_time,
+    MIN(total_elapsed_time) as min_elapsed_time,
+    AVG(bytes_scanned)
+FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+WHERE query_parameterized_hash IN ( ... )
+AND DATE_TRUNC('day', start_time) >= CURRENT_DATE() - 30
+GROUP BY query_parameterized_hash
+ORDER BY mean_elapsed_time DESC;
+\end{verbatim}
+
+\noindent I execute the queries 20 times across a whole day. 
+
+
+\section{Results and Discussion}
+
+\FloatBarrier
+
+\subsection{TPC-H}
+
+I start my analysis by investigating correlation between megabytes scanned and execution time.
+
+\begin{table}[htbp]
+    \centering
+    \begin{tabular}{lcc}
+        \toprule
+        \textbf{Warehouse} & \textbf{Query} & \textbf{Correlation} \\
+        \midrule
+        BISON\_WH\_L & Q1 & 0.999 \\
+        BISON\_WH\_L & Q18 & 1.000 \\
+        BISON\_WH\_L & Q5 & 1.000 \\
+        \midrule
+        BISON\_WH\_M & Q1 & 1.000 \\
+        BISON\_WH\_M & Q18 & 1.000 \\
+        BISON\_WH\_M & Q5 & 1.000 \\
+        \midrule
+        BISON\_WH\_S & Q1 & 1.000 \\
+        BISON\_WH\_S & Q18 & 1.000 \\
+        BISON\_WH\_S & Q5 & 1.000 \\
+        \midrule
+        BISON\_WH\_XS & Q1 & 1.000 \\
+        BISON\_WH\_XS & Q18 & 0.999 \\
+        BISON\_WH\_XS & Q5 & 1.000 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Pearson correlation between MB scanned and execution time by warehouse and query type (rounded to three decimals)}
+    \label{tab:tpch_mbscanned_executiontime_correlations}
+\end{table}
+
+In table~\ref{tab:tpch_mbscanned_executiontime_correlations} we see that there is a definitive positive correlation between MB scanned and execution time. Given that we group by warehouse and query type, we end up checking correlation between the different scale factors and with a factor of 10 between each scale factor it is perhaps not so strange that the MB scanned end up having a strong correlation. 
+
+\medskip \noindent 
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=1\textwidth]{imgs/tpch/query_scaling_comparison.png}
+    \caption{Log log plots of the queries under different scale factors for each warehouse size. }
+    \label{fig:query_scaling_comp}
+\end{figure}
+
+In figure~\ref{fig:query_scaling_comp} we see that query 18 scales the most linearly, whereas the other are penalized less by scale factor. 
+
+\FloatBarrier
+
+
+\section{Conclusion}
+
+\newpage
+\bibliographystyle{plain}
+\bibliography{lit}
+
+\end{document}

@@ -19,13 +19,113 @@ q1 = df[df['QUERY'] == 'Q1']
 q5 = df[df['QUERY'] == 'Q5']
 q18 = df[df['QUERY'] == 'Q18'] 
 
-# What do I want to show? Scalefactor vs warehouse? mb_scanned vs execution time?
-q1_scalefactor1 = q1[q1["SCALEFACTOR"] == "SF1"]
-q1_scalefactor10 = q1[q1["SCALEFACTOR"] == "SF10"]
-q1_scalefactor100 = q1[q1["SCALEFACTOR"] == "SF100"]
-q1_scalefactor1000 = q1[q1["SCALEFACTOR"] == "SF1000"]
+# First create a numeric scale factor column by removing 'SF' and converting to int
+df['NUMERIC_SCALEFACTOR'] = df['SCALEFACTOR'].str.replace('SF', '').astype(int)
 
-print(q1_scalefactor1[["MEAN_ELAPSED_TIME", "WAREHOUSE"]])
+# Now create the new column
+df['TIME_PER_SCALE'] = df['MEAN_ELAPSED_TIME'] / df['NUMERIC_SCALEFACTOR']
+
+
+
+
+
+
+
+
+warehouses = df['WAREHOUSE'].unique()
+
+# Create one figure with 4 subplots
+fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+axes = axes.flatten()
+
+# For each warehouse
+for idx, warehouse in enumerate(warehouses):
+   warehouse_data = df[df['WAREHOUSE'] == warehouse]
+
+   # For each query
+   for query in sorted(warehouse_data['QUERY'].unique()):
+       query_data = warehouse_data[warehouse_data['QUERY'] == query]
+       
+       # Calculate mean for each scale factor
+       means = query_data.groupby('NUMERIC_SCALEFACTOR')['MEAN_ELAPSED_TIME'].mean()
+       
+       axes[idx].plot(means.index, means.values, marker='o', label=f'Query {query}')
+
+   axes[idx].set_xscale('log')  # Log scale for scale factor
+   axes[idx].set_yscale('log')  # Log scale for time
+   axes[idx].grid(True)
+   axes[idx].set_xlabel('Scale Factor (log scale)')
+   axes[idx].set_ylabel('Mean Execution Time ms (log scale)')
+   axes[idx].set_title(f'{warehouse}')
+   axes[idx].legend()
+
+plt.suptitle('Query Execution Time vs Scale Factor by Warehouse', y=0.95, fontsize=16)
+plt.tight_layout()
+plt.subplots_adjust(top=0.90)
+plt.savefig("figs/query_scaling_comparison.png", bbox_inches='tight', pad_inches=0.3)
+plt.close()#
+
+input("enter to continue")
+
+queries = df['QUERY'].unique()
+warehouses = df['WAREHOUSE'].unique()
+
+def sort_scalefactor(x):
+    return int(x.replace('SF', ''))
+
+# Create a figure for each query
+for query in queries:
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    axes = axes.flatten()
+    
+    # For each warehouse
+    for idx, warehouse in enumerate(warehouses):
+        # Get data for this query and warehouse
+        data = df[(df['QUERY'] == query) & (df['WAREHOUSE'] == warehouse)]
+        
+        # Sort scale factors
+        data = data.sort_values(by='SCALEFACTOR', key=lambda x: x.map(sort_scalefactor))
+        
+        # Normalize execution times relative to SF100
+        sf100_time = data[data['SCALEFACTOR'] == 'SF100']['MEAN_ELAPSED_TIME'].values[0]
+        data = data.copy()
+        # Subtract 1 to get negative values when faster than SF100
+        data['NORMALIZED_TIME'] = (data['MEAN_ELAPSED_TIME'] / sf100_time) - 1
+        
+        # Create bar plot
+        data.plot(kind='bar',
+                 x='SCALEFACTOR',
+                 y='NORMALIZED_TIME',
+                 ax=axes[idx],
+                 title=f'{warehouse}')
+        
+        # Customize subplot
+        axes[idx].set_xlabel('Scale Factor')
+        axes[idx].set_ylabel('Relative Execution Time\n(0 = SF100, -0.5 = 50% faster, 0.5 = 50% slower)')
+        axes[idx].tick_params(axis='x', rotation=45)
+        axes[idx].grid(True, axis='y')
+        
+        # Add actual times as text on bars
+        for i, v in enumerate(data['MEAN_ELAPSED_TIME']):
+            y_pos = data['NORMALIZED_TIME'].iloc[i]
+            # Adjust text position based on whether bar is positive or negative
+            va = 'bottom' if y_pos >= 0 else 'top'
+            axes[idx].text(i, y_pos, 
+                         f'{v:,.0f}ms', 
+                         ha='center', 
+                         va=va)
+    
+    plt.suptitle(f'Query {query} Execution Times by Warehouse and Scale Factor\n(Normalized with SF100 as baseline, negative = faster)', 
+                 y=0.95, fontsize=16)
+    plt.tight_layout()
+    plt.subplots_adjust(top=0.90)
+    plt.savefig(f"figs/query_{query}_comparison_normalized_sf100.png", bbox_inches='tight', pad_inches=0.3)
+    plt.close()
+
+input("Press enter to continue")
+
+
+
 
 # warehouse_dfs = {name: group for name, group in df.groupby('WAREHOUSE')}
 # # print(q1_warehouse_dfs["BISON_WH_XS"])
