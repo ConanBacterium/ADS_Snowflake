@@ -97,12 +97,10 @@ class NaiveBayesHandler:
         self._classifier = NaiveBayesClassifier()
         
     def process(self, text, label):
-        """Handler for processing each row"""
         self._classifier.process(text, label)
         return []
         
     def end_partition(self):
-        """Handler for end of partition"""
         return list(self._classifier.endPartition())
 $$;
 
@@ -125,13 +123,15 @@ CREATE OR REPLACE TABLE nb_likelihoods_counts_priors AS (
         ) AS nb
 ); 
 
-select * from nb_likelihoods_counts_priors limit 50; 
-select count(*) from nb_likelihoods_counts_priors;
+-- select * from nb_likelihoods_counts_priors limit 50; 
+-- select count(*) from nb_likelihoods_counts_priors;
 
 
 --------------------------------------
 -------- EVALUATE ON TEST SET --------
 --------------------------------------
+-- ALTER SESSION SET USE_CACHED_RESULT=FALSE;
+-- DROP TABLE review_predictions2;
 
 CREATE OR REPLACE TABLE review_predictions2 (
     review_id INTEGER,
@@ -169,3 +169,31 @@ SELECT
     probability
 FROM ranked_predictions
 WHERE rank = 1;
+
+-- select * from review_predictions2;
+WITH confusion_counts AS (
+    SELECT 
+        true_label,
+        predicted_label,
+        COUNT(*) as count,
+        COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY true_label) as percentage
+    FROM review_predictions2
+    GROUP BY true_label, predicted_label
+),
+matrix_stats AS (
+    SELECT 
+        true_label,
+        predicted_label,
+        count,
+        ROUND(percentage * 100, 2) as percentage,
+        CONCAT(count, ' (', ROUND(percentage * 100, 2), '%)') as display_value
+    FROM confusion_counts
+)
+SELECT 
+    true_label as "Actual Label",
+    predicted_label as "Predicted Label",
+    count as "Count",
+    percentage as "Percentage",
+    display_value as "Display Value"
+FROM matrix_stats
+ORDER BY true_label, predicted_label;

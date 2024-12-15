@@ -22,7 +22,7 @@ sns.heatmap(confusion_matrix,
             square=True)  # Make cells square
 
 # Add labels and title
-plt.title('Test Set Confusion Matrix (pure SQL)', pad=20)
+plt.title('Test Set Confusion Matrix (UDTF)', pad=20)
 plt.ylabel('Actual Label')
 plt.xlabel('Predicted Label')
 
