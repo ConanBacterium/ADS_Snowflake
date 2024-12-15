@@ -31,6 +31,13 @@ Additionally we will conduct a standard TPC-H performance experiment with differ
 
 \section{Methodology}
 
+\subsection{Naive Bayes}
+The LATERAL FLATTEN function does a few key things:
+
+Takes a semi-structured column (like an array or object) and creates a new row for each element
+Preserves the original row's context/data while expanding the nested elements
+Returns a virtual table with helpful metadata columns (value, seq, key, path, index)
+
 \subsection{TPC-H}
 For my TPC-H implementation I use data from the Snowflake-supplied database \texttt{SNOWFLAKE\_SAMPLE\_DATA}. I test TPC-H query 1, 5 and 18, which I copied from a website\footnote{\url{https://docs.deistercloud.com/content/Databases.30/TPCH\%20Benchmark.90/Sample\%20querys.20.xml?embedded=true\#7b15827ccb57cbcec68be7a26953590c}} and modified them to use Snowflake date functions. 
 
@@ -113,6 +120,10 @@ In figure~\ref{fig:query_scaling_comp} we see that query 18 scales the most line
 
 \FloatBarrier
 
+\subsection{Naive Bayes}
+
+\subsubsection{SQL}
+Overall Accuracy: 38.54\%
 
 \section{Conclusion}
 

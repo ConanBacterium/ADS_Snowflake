@@ -18,7 +18,21 @@ CREATE OR REPLACE TABLE train_transformed_yelp_reviews (
 INSERT INTO train_transformed_yelp_reviews (label, text)
 SELECT 
     CAST(data:label AS INTEGER) as label,
-    CAST(data:text AS STRING) as text
+    REGEXP_REPLACE(                           -- Step 4: Remove extra spaces
+        REGEXP_REPLACE(                       -- Step 3: Add space between letter-number transitions
+            REGEXP_REPLACE(                   -- Step 2: Convert any non-alphanumeric to space
+                LOWER(                        -- Step 1: Convert to lowercase first
+                    TRIM(CAST(data:text AS STRING))
+                ),
+                '([a-z])([0-9])|([0-9])([a-z])',
+                '\1\3 \2\4'
+            ),
+            '[^a-z0-9 ]',
+            ' '
+        ),
+        ' +',
+        ' '
+    ) as cleaned_text
 FROM yelp_review_training;
 
 
@@ -63,6 +77,7 @@ INSERT INTO priors (
     FROM label_counts, total
 );
 
+select * from priors;
 
 
 
@@ -126,7 +141,21 @@ CREATE OR REPLACE TABLE test_transformed_yelp_reviews (
 INSERT INTO test_transformed_yelp_reviews (label, text)
 SELECT 
     CAST(data:label AS INTEGER) as label,
-    CAST(data:text AS STRING) as text
+    REGEXP_REPLACE(                           -- Step 4: Remove extra spaces
+        REGEXP_REPLACE(                       -- Step 3: Add space between letter-number transitions
+            REGEXP_REPLACE(                   -- Step 2: Convert any non-alphanumeric to space
+                LOWER(                        -- Step 1: Convert to lowercase first
+                    TRIM(CAST(data:text AS STRING))
+                ),
+                '([a-z])([0-9])|([0-9])([a-z])',
+                '\1\3 \2\4'
+            ),
+            '[^a-z0-9 ]',
+            ' '
+        ),
+        ' +',
+        ' '
+    ) as cleaned_text
 FROM yelp_review_testing;
 
 
@@ -240,3 +269,5 @@ SELECT
     display_value as "Display Value"
 FROM matrix_stats
 ORDER BY true_label, predicted_label;
+
+
