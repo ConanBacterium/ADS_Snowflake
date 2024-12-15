@@ -32,11 +32,120 @@ Additionally we will conduct a standard TPC-H performance experiment with differ
 \section{Methodology}
 
 \subsection{Naive Bayes}
-The LATERAL FLATTEN function does a few key things:
+The provided Yelp Review dataset contains 5 labels between 0 and 4, presumably representing a rating with 0 being worst and 4 being best. 
 
-Takes a semi-structured column (like an array or object) and creates a new row for each element
-Preserves the original row's context/data while expanding the nested elements
-Returns a virtual table with helpful metadata columns (value, seq, key, path, index)
+\medskip \noindent I load the test and training datasets into my database using SnowSQL windows client. From thereon after I use worksheets in the web interface SnowSight. 
+
+\medskip \noindent I create a transformed table, \texttt{yelp\_review\_training} and \texttt{yelp\_review\_testing}, for both datasets with columns id INT, label INT and text STRING. I load the text column by transforming the text field of the jsons using regex in the following manner: convert to lower space, convert non-alphanumeric to space, add space between letter-number transitions and remove extra spaces. 
+
+\medskip \noindent I then create a new table, \texttt{train\_exploded\_reviews} and \texttt{test\_exploded\_reviews} with columns \texttt{review\_id} INT, word STRING, label INT, and populate it with data from the \texttt{yelp\_review\_training} using lateral flatten on the text column to create one row per word. 
+
+\medskip \noindent These exploded tables are used in both the pure SQL implementation and the UDTF implementation. 
+
+\subsubsection{SQL}
+In the following I will first outline how I calculate the priors and the likelihoods for each label and word in training set. I will subsequently outline how I use the priors and likelihoods to predict the reviews in the test set. The SQL code can be found in the github repository under \url{naive_bayes/SQL/naive_bayes.sql}.
+
+\medskip\noindent \textbf{Priors and Likelihoods from the training set}
+
+\smallskip \noindent I create a priors table which I populate by counting how many reviews each label has and divide it by the total number of reviews.
+
+
+\medskip \noindent Remember that the likelihood is defined as 
+
+$$P(w|c) = \frac{count(w,c) + 1}{\sum_{w' \in V} count(w',c) + |V|}$$
+
+\noindent where 
+\begin{itemize}
+    \item $P(w|c)$ is the probability of word $w$ given class $c$
+    \item $count(w,c)$ is the frequency of word $w$ in class $c$
+    \item $V$ is the vocabulary (set of all unique words)
+    \item $|V|$ is the size of the vocabulary
+    \item The summation $\sum_{w' \in V} count(w',c)$ represents the total word count in class $c$
+\end{itemize}
+
+
+\medskip \noindent To create a likelihoods table, I first create a table \texttt{word\_freq\_pr\_class}. I use a CTE that cross joins every distinct word in the training set with every label. I then left join onto the word-label combinations every word in the corpus with join-predicate on word and label. I group by word and label, so I can use the aggregate function count to get the frequency of each word per label. Hence the name of the table. 
+
+\medskip \noindent I then create the likelihoods table by summing the number of words per class in a CTE called \texttt{freq\_pr\_class}. I can then divide the word frequency by class with the total frequency by class plus the vocabulary size. 
+
+\medskip\noindent \textbf{Evaluation}
+
+\smallskip \noindent I create a table \texttt{review\_probabilities} which I populate with the true label and the predicted label for the test set, using the likelihoods and priors obtained from the training set. By constructing such a table different metrics can always be retrieved afterwards. In the following I will go over CTEs and final select query used in populating the table. 
+
+\medskip \noindent \textbf{CTEs}
+\begin{itemize}
+    \item \textit{review\_probabilities}: For each review and possible class label combination, it calculates the sum of log likelihoods \texttt{SUM(LN(COALESCE(l.likelihood, 1e-10)))}. Takes natural log of each word's likelihood, and uses 1e-10 if likelihood is NULL (word not seen in training). It then sums these logs, which is equivalent to multiplying probabilities. It then gets log of prior probability: \texttt{LN(p.prior)} and uses \texttt{CROSS JOIN} to ensure every review is tested against every possible label.
+    
+    \item \textit{final\_predictions}: Combines the log likelihood and log prior: \texttt{log\_likelihood + log\_prior}, which is equivalent to applying Naive Bayes in log space. It then converts back to regular probability space using the \texttt{EXP} function. 
+    
+    \item \textit{best\_predictions}: Uses \texttt{ROW\_NUMBER()} to rank predictions for each review. It orders by probability DESC so rank 1 is the highest probability. It keeps track of both \texttt{true\_label} and \texttt{predicted\_label} for evaluation.
+\end{itemize}
+
+\medskip \noindent The final SELECT returns:
+\begin{itemize}
+    \item \texttt{review\_id}: Which review we're predicting
+    \item \texttt{true\_label}: The actual label from the test set
+    \item \texttt{predicted\_label}: The model's prediction
+    \item \texttt{probability}: How confident the model is in this prediction
+\end{itemize}
+
+\noindent This implements Naive Bayes classification in SQL, calculating:
+$$P(c|d) \propto P(c) \prod_{w \in d} P(w|c)$$
+But in log space to avoid numerical underflow:
+$$\log P(c|d) = \log P(c) + \sum_{w \in d} \log P(w|c)$$
+
+\medskip \noindent \textbf{Confusion Matrix Analysis}
+
+The confusion matrix is calculated using two CTEs generated by the CoPilot supplied in SnowSight:
+
+\begin{itemize}
+    \item \textit{confusion\_counts}: Computes the base statistics
+    \begin{itemize}
+        \item Groups predictions by \texttt{true\_label} and \texttt{predicted\_label}
+        \item Calculates raw counts of each combination
+        \item Computes percentage within each true label using window function:\\
+        \texttt{COUNT(*) / SUM(COUNT(*)) OVER (PARTITION BY true\_label)}
+    \end{itemize}
+    
+    \item \textit{matrix\_stats}: Formats the results for display
+    \begin{itemize}
+        \item Rounds percentages to 2 decimal places
+        \item Creates a display string combining count and percentage:\\
+        \texttt{CONCAT(count, ' (', ROUND(percentage * 100, 2), '\%)')}
+    \end{itemize}
+\end{itemize}
+
+\medskip \noindent The final output includes:
+\begin{itemize}
+    \item \texttt{Actual Label}: The true class from the test set
+    \item \texttt{Predicted Label}: The model's prediction
+    \item \texttt{Count}: Raw number of instances
+    \item \texttt{Percentage}: Proportion within the true label class
+    \item \texttt{Display Value}: Combined format showing \texttt{count (percentage\%)}
+\end{itemize}
+
+\medskip \noindent In the github repository under \url{naive_bayes/SQL/visualize_confusion_matrix.py} there is a Python script which generates the confusion matrix as a PNG, also generated by CoPilot.
+ 
+\subsubsection{Python UDTF}
+My Python UDTF code can be seen in three scripts under the directory \url{naive_bayes/UDTF/} - two of the scripts names indicate that they were failed attempts, and the last works. 
+
+\medskip \noindent Before I outline my UDTF I will first comment on the nature of Snowflake UDTFs. I have not found in the official Snowflake documentation any mention of ML-use cases for UDTFs, but rather UDTFs seem to be used for writing custom aggregate functions or 1-1 mappings. UDTFs are executed over partitions of the data, and the state kept by the UDTF is local to each partition. 
+We want to count across the entire training dataset, we don't want to partition our data. It is possible to chain UDTFs, which to me feels like the programmer has to fight the design of the UDTFs. 
+
+\medskip \noindent Should the input to the UDTF be partitioned by word? That allows for word counting, but you then need to explode your documents before feeding them to the UDTF.
+
+\medskip \noindent It is possible to 'cheat' slightly by saying 
+
+\subsubsection{Execution Times}
+I use a large warehouse for both implementations. 
+
+\medskip \noindent For the both implementations I collect execution times from after creating the exploded review tables until having populated the priors and likelihoods (table creation included), and I then time the evaluation of the entire test set not withoutcounting the computation of the confusion matrix. In the scripts select statements with start and end section flags can be seen to see exactly what is timed. I time it by looking at the query history manually. I do it 5 times to validate that the times I get are reasonable. 
+
+\medskip \noindent This is admittedly not the most reliable way to time executions, but it will serve as a rough estimate to see which implementation is more performant. As the training consists of several queries, the Snowflake scheduler will introduce inconsistencies, further complicating a production-grade profiling. 
+
+\medskip \noindent A more thorough framework for timing executions are given for my TPC-H profiling. 
+
+
 
 \subsection{TPC-H}
 For my TPC-H implementation I use data from the Snowflake-supplied database \texttt{SNOWFLAKE\_SAMPLE\_DATA}. I test TPC-H query 1, 5 and 18, which I copied from a website\footnote{\url{https://docs.deistercloud.com/content/Databases.30/TPCH\%20Benchmark.90/Sample\%20querys.20.xml?embedded=true\#7b15827ccb57cbcec68be7a26953590c}} and modified them to use Snowflake date functions. 
@@ -76,7 +185,9 @@ ORDER BY mean_elapsed_time DESC;
 
 \subsection{TPC-H}
 
-I start my analysis by investigating correlation between megabytes scanned and execution time.
+I have not found anything interesting in my profiling data. Indeed the data exploration I have done has been done in Python and not Snowflake, and is therefore not interesting when viewing this project as about Snowflake. 
+
+\medskip \noindent I start my analysis by investigating correlation between megabytes scanned and execution time.
 
 \begin{table}[htbp]
     \centering
@@ -124,6 +235,17 @@ In figure~\ref{fig:query_scaling_comp} we see that query 18 scales the most line
 
 \subsubsection{SQL}
 Overall Accuracy: 38.54\%
+
+priors and likelihoods start 	6:04:25
+priors and likelihoods end 	6:04:37
+
+test set evaluation start 	6:04:38
+test set evaluation end 	6:04:44
+
+
+UDTF 2m 46s for creating the likelihoods and counts and priors
+
+\subsubsection{Python UDTF}
 
 \section{Conclusion}
 

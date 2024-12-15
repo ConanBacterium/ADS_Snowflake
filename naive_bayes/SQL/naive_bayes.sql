@@ -8,6 +8,11 @@ describe table YELP_REVIEW_TESTING;
 describe table YELP_REVIEW_TRAINING;
 
 
+
+---------------------------------
+-- DATA CLEANING AND EXPLOSION --
+---------------------------------
+
 CREATE OR REPLACE TABLE train_transformed_yelp_reviews (
     id INTEGER AUTOINCREMENT START = 1,
     label INTEGER,
@@ -53,6 +58,59 @@ INSERT INTO train_exploded_reviews (
     WHERE value <> ''
 ); 
 
+CREATE OR REPLACE TABLE test_transformed_yelp_reviews (
+    id INTEGER AUTOINCREMENT START = 1,
+    label INTEGER,
+    text STRING,
+    primary key(id)
+);
+
+INSERT INTO test_transformed_yelp_reviews (label, text)
+SELECT 
+    CAST(data:label AS INTEGER) as label,
+    REGEXP_REPLACE(                           -- Step 4: Remove extra spaces
+        REGEXP_REPLACE(                       -- Step 3: Add space between letter-number transitions
+            REGEXP_REPLACE(                   -- Step 2: Convert any non-alphanumeric to space
+                LOWER(                        -- Step 1: Convert to lowercase first
+                    TRIM(CAST(data:text AS STRING))
+                ),
+                '([a-z])([0-9])|([0-9])([a-z])',
+                '\1\3 \2\4'
+            ),
+            '[^a-z0-9 ]',
+            ' '
+        ),
+        ' +',
+        ' '
+    ) as cleaned_text
+FROM yelp_review_testing;
+
+
+CREATE OR REPLACE TABLE test_exploded_reviews (
+    review_id INTEGER REFERENCES test_transformed_yelp_reviews(id),
+    word STRING,
+    label INTEGER
+);
+
+INSERT INTO test_exploded_reviews (
+    SELECT 
+        id as review_id,
+        value AS word,
+        label
+    FROM
+        test_transformed_yelp_reviews,
+        LATERAL FLATTEN(input => SPLIT(text, ' ')) f
+    WHERE value <> ''
+); 
+
+
+
+----------------------------------------
+-- CALCULATING PRIORS AND LIKELIHOODS --
+----------------------------------------
+
+
+SELECT 'PURE SQL PRIORS AND LIKELIHOODS START';
 
 
 CREATE OR REPLACE TABLE priors (
@@ -122,62 +180,15 @@ insert into likelihoods (
     join vocabulary
 );
 
-select * from likelihoods limit 50;
-select count(*) from likelihoods where likelihood = 0;  -- sanity test !! 
+
+SELECT 'PURE SQL PRIORS AND LIKELIHOODS END';
+
 
 ---------------------------------------
 ---- TESTING ACCURACY ON TEST SET  ----
 ---------------------------------------
 
-
---------- MY OWN ---------
-CREATE OR REPLACE TABLE test_transformed_yelp_reviews (
-    id INTEGER AUTOINCREMENT START = 1,
-    label INTEGER,
-    text STRING,
-    primary key(id)
-);
-
-INSERT INTO test_transformed_yelp_reviews (label, text)
-SELECT 
-    CAST(data:label AS INTEGER) as label,
-    REGEXP_REPLACE(                           -- Step 4: Remove extra spaces
-        REGEXP_REPLACE(                       -- Step 3: Add space between letter-number transitions
-            REGEXP_REPLACE(                   -- Step 2: Convert any non-alphanumeric to space
-                LOWER(                        -- Step 1: Convert to lowercase first
-                    TRIM(CAST(data:text AS STRING))
-                ),
-                '([a-z])([0-9])|([0-9])([a-z])',
-                '\1\3 \2\4'
-            ),
-            '[^a-z0-9 ]',
-            ' '
-        ),
-        ' +',
-        ' '
-    ) as cleaned_text
-FROM yelp_review_testing;
-
-
-CREATE OR REPLACE TABLE test_exploded_reviews (
-    review_id INTEGER REFERENCES test_transformed_yelp_reviews(id),
-    word STRING,
-    label INTEGER
-);
-
-INSERT INTO test_exploded_reviews (
-    SELECT 
-        id as review_id,
-        value AS word,
-        label
-    FROM
-        test_transformed_yelp_reviews,
-        LATERAL FLATTEN(input => SPLIT(text, ' ')) f
-    WHERE value <> ''
-); 
-
-
-
+SELECT 'PURE SQL EVALUATION TEST SET START';
 
 CREATE OR REPLACE TABLE review_predictions (
     review_id INTEGER,
@@ -237,10 +248,12 @@ FROM best_predictions
 WHERE rn = 1
 ORDER BY review_id;
 
+SELECT 'PURE SQL EVALUATION TEST SET END';
 
-select * from review_predictions; 
-select count(*) from review_predictions where true_label = predicted_label; 
-select count(*) from review_predictions; 
+
+-- select * from review_predictions; 
+-- select count(*) from review_predictions where true_label = predicted_label; 
+-- select count(*) from review_predictions; 
 
 
 WITH confusion_counts AS (
